@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Q-Paper Studio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#f7f8fa; --bd:#d9dde3; --tx:#1f2328; --mu:#57606a; --ac:#3b82d4; --ok:#1a7f37; --bad:#c62828; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,"Segoe UI",system-ui,sans-serif; color:var(--tx); background:var(--bg); }
+  header { background:#fff; border-bottom:1px solid var(--bd); padding:10px 20px; display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0 12px 0 0; }
+  nav button { border:0; background:none; padding:6px 10px; cursor:pointer; font:inherit; color:var(--mu); border-bottom:2px solid transparent; }
+  nav button.on { color:var(--ac); border-color:var(--ac); }
+  .who { margin-left:auto; display:flex; gap:8px; align-items:center; color:var(--mu); }
+  main { padding:18px 20px; max-width:1500px; margin:auto; }
+  .card { background:#fff; border:1px solid var(--bd); border-radius:6px; padding:14px; margin-bottom:14px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+  label { display:flex; flex-direction:column; font-size:12px; color:var(--mu); gap:2px; }
+  input, select, textarea, button { font:inherit; }
+  input, select, textarea { border:1px solid var(--bd); border-radius:4px; padding:5px 7px; background:#fff; color:var(--tx); }
+  textarea { width:100%; min-height:200px; font-family:ui-monospace,Menlo,monospace; font-size:13px; }
+  button.b { border:1px solid var(--bd); background:#fff; border-radius:4px; padding:6px 12px; cursor:pointer; }
+  button.b:hover { border-color:var(--ac); }
+  button.p { background:var(--ac); color:#fff; border-color:var(--ac); }
+  button.ok { background:var(--ok); color:#fff; border-color:var(--ok); }
+  button.x { color:var(--bad); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--bd); vertical-align:top; }
+  th { font-size:12px; color:var(--mu); font-weight:600; }
+  tr.click:hover { background:#f0f4fa; cursor:pointer; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; background:#e8edf3; }
+  .tag.approved,.tag.published { background:#dcf3e2; color:var(--ok); }
+  .tag.revision_requested { background:#fde7e7; color:var(--bad); }
+  .tag.under_review { background:#fff3d6; color:#8a5a00; }
+  .grid3 { display:grid; grid-template-columns:minmax(220px,1fr) minmax(320px,1.4fr) minmax(320px,1.4fr); gap:14px; align-items:start; }
+  @media (max-width:1000px) { .grid3 { grid-template-columns:1fr; } }
+  .panel h3 { margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--mu); }
+  .panel img { max-width:100%; border:1px solid var(--bd); }
+  #svgbox { border:1px solid var(--bd); background:#fff; touch-action:none; }
+  #svgbox svg { width:100%; height:auto; display:block; }
+  #svgbox [data-id] { cursor:move; }
+  #svgbox [data-id].sel { stroke:var(--ac); }
+  .warn { background:#fff3d6; border:1px solid #f0d58a; padding:8px 10px; border-radius:4px; margin-bottom:10px; }
+  .err { background:#fde7e7; border:1px solid #f1b4b4; padding:8px 10px; border-radius:4px; margin-bottom:10px; }
+  .preview { border:1px solid var(--bd); padding:8px 10px; background:#fff; min-height:60px; font-family:"Times New Roman",serif; font-size:16px; white-space:pre-wrap; }
+  .objrow input { width:62px; } .objrow input.id { width:90px; } .objrow input.wide { width:110px; }
+  .muted { color:var(--mu); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Q-Paper Studio</h1>
+  <nav id="nav">
+    <button data-v="upload" class="on">Upload</button>
+    <button data-v="queue">Review queue</button>
+    <button data-v="bank">Question bank</button>
+    <button data-v="papers">Exam paper</button>
+    <button data-v="school">School</button>
+  </nav>
+  <div class="who">
+    <span>User</span><input id="user" value="teacher1" size="9">
+    <span>Role</span><select id="role"><option>teacher</option><option>typist</option><option>admin</option></select>
+    <span>School</span><input id="school" value="1" size="2">
+  </div>
+</header>
+<main>
+  <div id="msg"></div>
+  <section id="v-upload"></section>
+  <section id="v-queue" hidden></section>
+  <section id="v-edit" hidden></section>
+  <section id="v-bank" hidden></section>
+  <section id="v-papers" hidden></section>
+  <section id="v-school" hidden></section>
+</main>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const hdr = () => ({ "X-User": $("#user").value, "X-Role": $("#role").value, "X-School-Id": $("#school").value });
+
+async function api(path, opt = {}) {
+  const r = await fetch("/api" + path, { ...opt, headers: { ...hdr(), ...(opt.json !== undefined ? { "Content-Type":"application/json" } : {}) },
+                                         body: opt.json !== undefined ? JSON.stringify(opt.json) : opt.body });
+  if (!r.ok) { let d = r.statusText; try { d = (await r.json()).detail; } catch {} throw new Error(typeof d === "string" ? d : JSON.stringify(d)); }
+  return r;
+}
+const j = async (p, o) => (await api(p, o)).json();
+function note(text, kind = "warn") { $("#msg").innerHTML = text ? `<div class="${kind}">${esc(text).replace(/\n/g,"<br>")}</div>` : ""; if (text) window.scrollTo(0, 0); }
+async function blobUrl(path) { try { return URL.createObjectURL(await (await api(path)).blob()); } catch { return ""; } }
+async function download(path, name) {
+  try { const b = await (await api(path)).blob(); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name; a.click(); }
+  catch (e) { note(e.message, "err"); }
+}
+
+// ── navigation ──
+function show(v) {
+  document.querySelectorAll("main > section").forEach(s => s.hidden = s.id !== "v-" + v);
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  note("");
+  ({ upload: renderUpload, queue: renderQueue, bank: renderBank, papers: renderPapers, school: renderSchool })[v]?.()
+    ?.catch?.(x => note(x.message, "err"));
+}
+$("#nav").onclick = e => e.target.dataset.v && show(e.target.dataset.v);
+
+// ── upload ──
+async function renderUpload() {
+  const eng = await j("/engines").catch(() => null);
+  const line = n => eng ? (eng[n].available ? "available" : "unavailable: " + esc(eng[n].reason)) : "";
+  $("#v-upload").innerHTML = `
+  <div class="card"><h3 style="margin-top:0">Upload a handwritten question</h3>
+   <p class="muted">Photo, scan or PDF (first page). Python-only: ${line("python")}. watsonx.ai: ${line("watsonx")}${eng && eng.watsonx.school_allows === false ? " (disabled by this school)" : ""}.</p>
+   <form id="uf" class="row">
+    <label>File<input type="file" name="file" accept="image/*,application/pdf" required></label>
+    <label>Processing<select name="mode"><option value="hybrid">Hybrid (watsonx, falls back to Python)</option><option value="python">Python only (no AI)</option><option value="watsonx">watsonx.ai only</option></select></label>
+    <label>Subject<select name="subject"><option>Physics</option><option>Chemistry</option><option>Mathematics</option><option>Biology</option></select></label>
+    <label>Class<input name="class_name" size="5" placeholder="XI"></label>
+    <label>Chapter<input name="chapter" placeholder="optional"></label>
+    <label>Marks<input name="marks" type="number" min="0" value="1" style="width:60px"></label>
+    <label>Difficulty<select name="difficulty"><option>Easy</option><option selected>Medium</option><option>Hard</option></select></label>
+    <button class="b p" id="ub">Digitise</button>
+   </form></div>`;
+  $("#uf").onsubmit = async e => {
+    e.preventDefault(); const b = $("#ub"); b.disabled = true; b.textContent = "Processing...";
+    try { const r = await j("/questions", { method: "POST", body: new FormData(e.target) }); openQuestion(r.question.id, r.warnings); }
+    catch (x) { note(x.message, "err"); } finally { b.disabled = false; b.textContent = "Digitise"; }
+  };
+}
+
+// ── lists ──
+const row = q => `<tr class="click" data-id="${q.id}"><td>${esc(q.code)}</td><td>${esc(q.subject)} ${esc(q.class_name)}</td><td>${esc(q.chapter)}${q.topic ? " / " + esc(q.topic) : ""}</td>
+  <td>${esc((q.text || "").slice(0, 90))}</td><td>${esc(q.difficulty)}</td><td>${q.marks}</td><td><span class="tag ${q.status}">${q.status.replace("_"," ")}</span></td></tr>`;
+const HEAD_CELLS = "<th>ID</th><th>Class</th><th>Chapter / topic</th><th>Question</th><th>Level</th><th>Marks</th><th>Status</th>";
+const head = `<tr>${HEAD_CELLS}</tr>`;
+function wireRows(el) { el.querySelectorAll("tr.click").forEach(r => r.onclick = () => openQuestion(+r.dataset.id)); }
+
+async function renderQueue() {
+  let html = "";
+  for (const st of ["draft", "under_review", "revision_requested", "approved"]) {
+    const r = await j(`/questions?status=${st}&limit=100`);
+    html += `<h3>${st.replace("_"," ")} (${r.total})</h3>` + (r.total ? `<table>${head}${r.items.map(row).join("")}</table>` : `<p class="muted">None</p>`);
+  }
+  $("#v-queue").innerHTML = `<div class="card">${html}</div>`; wireRows($("#v-queue"));
+}
+
+async function renderBank() {
+  $("#v-bank").innerHTML = `<div class="card"><div class="row">
+   <label>Concept search (use + between ideas)<input id="bq" size="34" placeholder="newton + inclined plane"></label>
+   <label>Subject<select id="bs"><option value="">Any</option><option>Physics</option><option>Chemistry</option><option>Mathematics</option><option>Biology</option></select></label>
+   <label>Class<input id="bc" size="5"></label><label>Chapter<input id="bch" size="14"></label>
+   <label>Level<select id="bd"><option value="">Any</option><option>Easy</option><option>Medium</option><option>Hard</option></select></label>
+   <label>Marks<input id="bm" type="number" style="width:60px"></label><button class="b p" id="bgo">Search</button></div>
+   <div id="bres" style="margin-top:12px"></div></div>`;
+  const go = async () => {
+    const p = new URLSearchParams({ status: "published", q: $("#bq").value, subject: $("#bs").value, class_name: $("#bc").value, chapter: $("#bch").value, difficulty: $("#bd").value });
+    if ($("#bm").value) p.set("marks", $("#bm").value);
+    try {
+      const r = await j("/questions?" + p);
+      $("#bres").innerHTML = r.total ? `<p class="muted">${r.total} published question(s)</p><table>${head}${r.items.map(row).join("")}</table>` : `<p class="muted">No published questions match.</p>`;
+      wireRows($("#bres"));
+    } catch (x) { note(x.message, "err"); }
+  };
+  $("#bgo").onclick = go; $("#bq").onkeydown = e => e.key === "Enter" && go(); go();
+}
+
+// ── editor ──
+let Q = null, D = null, SEL = null, DIRTY = false;
+
+async function openQuestion(id, warnings) {
+  try {
+    Q = await j(`/questions/${id}`);
+    D = JSON.parse(JSON.stringify(Q.diagram?.objects ? Q.diagram : { diagram_type:"custom", width:400, height:300, objects:[] }));
+    SEL = null; DIRTY = false;
+    document.querySelectorAll("main > section").forEach(s => s.hidden = s.id !== "v-edit");
+    document.querySelectorAll("#nav button").forEach(b => b.classList.remove("on"));
+    note(warnings?.length ? warnings.join("\n") : "");
+    await drawEditor();
+  } catch (x) { note(x.message, "err"); }
+}
+
+const editable = () => ["draft", "under_review", "revision_requested"].includes(Q.status);
+const OBJ_FIELDS = { line:["x1","y1","x2","y2"], arrow:["x1","y1","x2","y2","label"], rect:["x","y","w","h","rotate"], circle:["cx","cy","r"],
+                     arc:["cx","cy","r","start","end"], text:["x","y","value","size"], polygon:["points"] };
+
+async function drawEditor() {
+  const ro = editable() ? "" : "disabled";
+  let src = "", isPdf = false;
+  if (Q.has_source_image) {
+    const blob = await (await api(`/questions/${Q.id}/source`)).blob();
+    isPdf = blob.type === "application/pdf"; src = URL.createObjectURL(blob);
+  }
+  const acts = { draft:["submit"], revision_requested:["submit"], under_review:["approve","request_revision"], approved:["publish"], published:["unpublish"] }[Q.status] || [];
+  $("#v-edit").innerHTML = `
+  <div class="card"><div class="row"><b>${esc(Q.code)}</b><span class="tag ${Q.status}">${Q.status.replace("_"," ")}</span>
+    <span class="muted">version ${Q.current_version}${Q.approved_version ? ` · approved v${Q.approved_version} by ${esc(Q.approved_by)}` : ""}</span>
+    <span style="margin-left:auto" class="row">
+     <button class="b" data-a="back">Back</button>
+     ${acts.map(a => `<button class="b ${a === "approve" || a === "publish" ? "ok" : a === "submit" ? "p" : ""}" data-act="${a}">${a.replace("_"," ")}</button>`).join("")}
+     <button class="b" data-exp="pdf">PDF</button><button class="b" data-exp="docx">DOCX</button><button class="b" data-exp="md">Markdown</button></span></div></div>
+  ${editable() ? "" : `<div class="warn">This question is ${Q.status.replace("_"," ")} and locked. Unpublish or request a revision to edit it.</div>`}
+  <div class="grid3">
+   <div class="panel card"><h3>Original scan</h3>${src ? (isPdf ? `<a href="${src}" target="_blank">Open PDF</a>` : `<img src="${src}">`) : "<p class='muted'>No scan</p>"}
+     ${Q.has_figure ? `<h3 style="margin-top:12px">Detected figure</h3><img id="figimg">` : ""}
+     <h3 style="margin-top:12px">Reprocess</h3>
+     <div class="row"><select id="rmode"><option value="hybrid">Hybrid</option><option value="python">Python only</option><option value="watsonx">watsonx only</option></select>
+     <button class="b" id="rp" ${ro}>Reconstruct again</button></div>
+     <p class="muted" style="font-size:12px">Creates a new version. Earlier versions are kept.</p></div>
+   <div class="panel card"><h3>Reconstructed text <span class="muted" style="text-transform:none">($ inline $, $$ display $$)</span></h3>
+     <textarea id="qt" ${ro}>${esc(Q.text)}</textarea>
+     <h3 style="margin-top:10px">Preview (symbols)</h3><div class="preview" id="pv"></div>
+     <h3 style="margin-top:10px">Metadata</h3>
+     <div class="row">
+      <label>Subject<select id="m_subject" ${ro}>${["Physics","Chemistry","Mathematics","Biology"].map(s => `<option ${s===Q.subject?"selected":""}>${s}</option>`).join("")}</select></label>
+      <label>Class<input id="m_class" size="4" value="${esc(Q.class_name)}" ${ro}></label>
+      <label>Marks<input id="m_marks" type="number" min="0" style="width:60px" value="${Q.marks}" ${ro}></label>
+      <label>Level<select id="m_diff" ${ro}>${["Easy","Medium","Hard"].map(s => `<option ${s===Q.difficulty?"selected":""}>${s}</option>`).join("")}</select></label>
+      <label>Type<input id="m_type" size="10" value="${esc(Q.question_type)}" ${ro}></label></div>
+     <div class="row" style="margin-top:6px"><label>Chapter<input id="m_chap" value="${esc(Q.chapter)}" ${ro}></label>
+      <label>Topic<input id="m_topic" value="${esc(Q.topic)}" ${ro}></label>
+      <label>Concepts (comma separated)<input id="m_conc" size="26" value="${esc((Q.concepts||[]).join(", "))}" ${ro}></label></div>
+     <div class="row" style="margin-top:10px"><label style="flex:1">Revision note<input id="note" placeholder="what changed" ${ro}></label><button class="b p" id="save" ${ro}>Save new version</button></div></div>
+   <div class="panel card"><h3>Diagram editor</h3>
+     <div class="row" style="margin-bottom:6px"><select id="tpl" ${ro}><option value="">Start from template...</option></select>
+      <select id="addt" ${ro}><option value="">Add object...</option>${Object.keys(OBJ_FIELDS).map(t => `<option>${t}</option>`).join("")}</select>
+      <button class="b" id="dclear" ${ro}>Clear</button></div>
+     <div id="svgbox"></div><p class="muted" style="font-size:12px">Drag an object to move it. Click to select and edit numbers below.</p>
+     <div id="objs"></div></div>
+  </div>
+  <div class="card"><h3 style="margin:0 0 6px">Revision history</h3>
+   <table><tr><th>#</th><th>When</th><th>By</th><th>Engine</th><th>Note</th><th></th></tr>
+   ${Q.versions.slice().reverse().map(v => `<tr><td>${v.number}</td><td>${new Date(v.created_at + "Z").toLocaleString()}</td><td>${esc(v.author)}</td><td>${esc(v.engine)}</td><td>${esc(v.note)}</td>
+     <td><button class="b" data-load="${v.number}" ${ro}>Load</button> ${v.number > 1 ? `<button class="b" data-cmp="${v.number}">Diff vs ${v.number - 1}</button>` : ""}</td></tr>`).join("")}</table><pre id="cmp" class="muted"></pre></div>`;
+
+  if (Q.has_figure) $("#figimg").src = await blobUrl(`/questions/${Q.id}/figure`);
+  const tpls = await j("/diagram/templates");
+  Object.keys(tpls).forEach(k => $("#tpl").insertAdjacentHTML("beforeend", `<option>${k}</option>`));
+
+  const ta = $("#qt");
+  ta.oninput = () => { $("#pv").textContent = symbolPreview(ta.value); DIRTY = true; };
+  $("#pv").textContent = symbolPreview(ta.value);
+  $("#tpl").onchange = e => { if (e.target.value) { D = JSON.parse(JSON.stringify(tpls[e.target.value])); SEL = null; DIRTY = true; drawDiagram(); } };
+  $("#dclear").onclick = () => { D.objects = []; SEL = null; DIRTY = true; drawDiagram(); };
+  $("#addt").onchange = e => { const t = e.target.value; if (!t) return; addObject(t); e.target.value = ""; };
+  $("#save").onclick = save;
+  $("#rp").onclick = async () => {
+    try { $("#rp").disabled = true; $("#rp").textContent = "Working...";
+      const r = await j(`/questions/${Q.id}/reprocess`, { method:"POST", json:{ mode: $("#rmode").value } }); openQuestion(Q.id, r.warnings); }
+    catch (x) { note(x.message, "err"); $("#rp").disabled = false; $("#rp").textContent = "Reconstruct again"; }
+  };
+  $("#v-edit").querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
+    if (DIRTY && editable() && !confirm("You have unsaved edits that will not be part of this action. Continue?")) return;
+    let body = {}; if (b.dataset.act === "request_revision") body = { note: prompt("What needs correcting?") || "" };
+    try { await j(`/questions/${Q.id}/${b.dataset.act}`, { method:"POST", json: body }); openQuestion(Q.id); } catch (x) { note(x.message, "err"); }
+  });
+  $("#v-edit").querySelectorAll("[data-exp]").forEach(b => b.onclick = () => download(`/questions/${Q.id}/export?format=${b.dataset.exp}`, `${Q.code}.${b.dataset.exp === "md" ? "zip" : b.dataset.exp}`));
+  $("#v-edit [data-a=back]").onclick = () => show("queue");
+  $("#v-edit").querySelectorAll("[data-load]").forEach(b => b.onclick = async () => {
+    const v = await j(`/questions/${Q.id}/versions/${b.dataset.load}`); $("#qt").value = v.text; D = v.diagram.objects ? v.diagram : D; SEL = null; DIRTY = true;
+    $("#pv").textContent = symbolPreview(v.text); drawDiagram(); note(`Loaded version ${v.number}. Save to keep it as a new version.`);
+  });
+  $("#v-edit").querySelectorAll("[data-cmp]").forEach(b => b.onclick = async () => {
+    const n = +b.dataset.cmp, r = await j(`/questions/${Q.id}/compare?a=${n-1}&b=${n}`);
+    $("#cmp").textContent = (r.text_diff.join("\n") || "(text unchanged)") + `\n\nDiagram: +${r.diagram.added.join(",")||"-"}  -${r.diagram.removed.join(",")||"-"}  changed: ${r.diagram.changed.join(",")||"-"}`;
+  });
+  drawDiagram();
+}
+
+// Rough plain-symbol preview; the PDF/DOCX apply the same idea server-side.
+const GREEK = { alpha:"α",beta:"β",gamma:"γ",delta:"δ",theta:"θ",lambda:"λ",mu:"μ",pi:"π",rho:"ρ",sigma:"σ",tau:"τ",phi:"φ",omega:"ω",Delta:"Δ",Omega:"Ω",times:"×",cdot:"·",pm:"±",leq:"≤",geq:"≥",neq:"≠",approx:"≈",infty:"∞",rightarrow:"→",degree:"°",sqrt:"√" };
+function symbolPreview(t) {
+  const sub = "₀₁₂₃₄₅₆₇₈₉", sup = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+  return t.replace(/\$\$?([\s\S]+?)\$\$?/g, (_, m) => m.replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, "($1)/($2)").replace(/\\([A-Za-z]+)/g, (x, n) => GREEK[n] ?? n)
+    .replace(/_\{?(\d+)\}?/g, (x, d) => [...d].map(c => sub[c]).join("")).replace(/\^\{?(\d+)\}?/g, (x, d) => [...d].map(c => sup[c]).join("")).replace(/[{}]/g, ""));
+}
+
+// ── diagram editing (one renderer: the server's SVG, shared with PDF/DOCX) ──
+let renderTimer = null;
+function drawDiagram() {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(async () => {
+    try { $("#svgbox").innerHTML = await (await api("/diagram/render", { method:"POST", json: D })).text(); wireSvg(); }
+    catch (x) { $("#svgbox").innerHTML = `<div class="err">${esc(x.message)}</div>`; }
+    drawObjTable();
+  }, 30);
+}
+
+function wireSvg() {
+  const svg = $("#svgbox svg"); if (!svg) return;
+  const group = id => svg.querySelectorAll(`[data-id="${id}"],[data-id="${id}-label"]`);
+  if (SEL) group(SEL).forEach(e => e.classList.add("sel"));
+  svg.querySelectorAll("[data-id]").forEach(el => {
+    const id = D.objects.some(o => o.id === el.dataset.id) ? el.dataset.id : el.dataset.id.replace(/-label$/, "");
+    el.onpointerdown = ev => {
+      SEL = id; drawObjTable(); svg.querySelectorAll(".sel").forEach(e => e.classList.remove("sel")); group(id).forEach(e => e.classList.add("sel"));
+      if (!editable()) return;
+      const pt = e => { const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); };
+      let last = pt(ev), moved = false;
+      const move = e => { const p = pt(e), dx = p.x - last.x, dy = p.y - last.y; last = p; if (dx || dy) { moved = true; shift(id, dx, dy); } };
+      const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); if (moved) { DIRTY = true; drawDiagram(); } };
+      addEventListener("pointermove", move); addEventListener("pointerup", up); ev.preventDefault();
+    };
+  });
+}
+function shift(id, dx, dy) {  // update the model; the SVG is re-rendered from it on release
+  const o = D.objects.find(o => o.id === id); if (!o) return;
+  const add = (k, d) => { if (k in o) o[k] = Math.round((+o[k] + d) * 10) / 10; };
+  ["x1","x2","x","cx"].forEach(k => add(k, dx)); ["y1","y2","y","cy"].forEach(k => add(k, dy));
+  if (o.points) o.points = o.points.map(p => [Math.round((p[0] + dx) * 10) / 10, Math.round((p[1] + dy) * 10) / 10]);
+  document.querySelectorAll(`#svgbox [data-id="${id}"],#svgbox [data-id="${id}-label"]`).forEach(el => {
+    const t = (el._t = el._t || [0, 0]); t[0] += dx; t[1] += dy;
+    el.setAttribute("transform", `translate(${t[0]} ${t[1]})`);   // visual feedback only
+  });
+}
+function addObject(t) {
+  const n = D.objects.filter(o => o.type === t).length + 1, id = `${t}${n}`;
+  const base = { line:{x1:60,y1:60,x2:200,y2:60}, arrow:{x1:100,y1:150,x2:200,y2:150,label:""}, rect:{x:120,y:100,w:60,h:40}, circle:{cx:200,cy:150,r:30},
+                 arc:{cx:100,cy:150,r:30,start:0,end:45}, text:{x:150,y:150,value:"label",size:16}, polygon:{points:[[100,200],[200,200],[150,120]]} }[t];
+  D.objects.push({ id, type:t, editable:true, ...base }); SEL = id; DIRTY = true; drawDiagram();
+}
+function drawObjTable() {
+  const el = $("#objs"); if (!el) return;
+  const ro = editable() ? "" : "disabled";
+  el.innerHTML = D.objects.length ? `<table>${D.objects.map((o, i) => `<tr class="objrow" style="${o.id === SEL ? "background:#eaf2fc" : ""}" data-i="${i}">
+     <td><input class="id" data-k="id" value="${esc(o.id)}" ${ro}><br><span class="muted">${o.type}</span></td>
+     <td>${OBJ_FIELDS[o.type].map(k => k === "points" ? `<label>points<input class="wide" data-k="points" value="${esc(JSON.stringify(o.points))}" ${ro}></label>`
+        : `<label>${k}<input data-k="${k}" class="${["value","label"].includes(k) ? "wide" : ""}" ${["value","label"].includes(k) ? "" : 'type="number" step="any"'} value="${esc(o[k] ?? "")}" ${ro}></label>`).join("")}</td>
+     <td><button class="b x" data-del="${i}" ${ro}>✕</button></td></tr>`).join("")}</table>` : `<p class="muted">No diagram objects. Pick a template or add objects.</p>`;
+  el.querySelectorAll("tr.objrow").forEach(tr => {
+    const o = D.objects[+tr.dataset.i];
+    tr.onclick = () => { if (SEL !== o.id) { SEL = o.id; drawDiagram(); } };
+    tr.querySelectorAll("input").forEach(inp => inp.onchange = () => {
+      const k = inp.dataset.k; let v = inp.value;
+      if (k === "points") { try { v = JSON.parse(v); } catch { return note("points must look like [[x,y],[x,y],...]", "err"); } }
+      else if (!["id","value","label"].includes(k)) v = v === "" ? undefined : +v;
+      if (k === "id" && D.objects.some(x => x !== o && x.id === v)) return note("Object ids must be unique", "err");
+      if (k === "id") SEL = v; o[k] = v; DIRTY = true; drawDiagram();
+    });
+  });
+  el.querySelectorAll("[data-del]").forEach(b => b.onclick = ev => { ev.stopPropagation(); D.objects.splice(+b.dataset.del, 1); SEL = null; DIRTY = true; drawDiagram(); });
+}
+
+async function save() {
+  const body = { text: $("#qt").value, diagram: D, note: $("#note").value, subject: $("#m_subject").value, class_name: $("#m_class").value,
+    marks: +$("#m_marks").value, difficulty: $("#m_diff").value, question_type: $("#m_type").value, chapter: $("#m_chap").value, topic: $("#m_topic").value,
+    concepts: $("#m_conc").value.split(",").map(s => s.trim()).filter(Boolean) };
+  try { await j(`/questions/${Q.id}/draft`, { method:"PUT", json: body }); await openQuestion(Q.id, ["Saved."]); } catch (x) { note(x.message, "err"); }
+}
+
+// ── papers ──
+async function renderPapers() {
+  $("#v-papers").innerHTML = `<div class="card"><h3 style="margin-top:0">Build an exam paper from published questions</h3>
+   <div class="row"><label>Title<input id="pt" value="Annual Examination 2026-27" size="28"></label><label>Class<input id="pc" size="5" value="XI"></label>
+    <label>Subject<select id="ps"><option>Physics</option><option>Chemistry</option><option>Mathematics</option><option>Biology</option></select></label>
+    <label>Time<input id="pd" value="3 Hours" size="9"></label><label>Total marks<input id="pm" type="number" value="70" style="width:70px"></label></div>
+   <div class="row" style="margin-top:8px"><label>Chapters (comma separated, blank = all)<input id="pch" size="34"></label>
+    <label>Easy %<input id="pe" type="number" value="30" style="width:60px"></label><label>Medium %<input id="pme" type="number" value="50" style="width:60px"></label>
+    <label>Hard %<input id="ph" type="number" value="20" style="width:60px"></label><button class="b p" id="pauto">Select automatically</button></div>
+   <p class="muted">Or tick questions below and choose "Create from ticked".</p><div id="plist"></div></div><div id="pres"></div>`;
+  const r = await j("/questions?status=published&limit=200");
+  $("#plist").innerHTML = r.total ? `<table><tr><th></th>${HEAD_CELLS}</tr>${r.items.map(q => `<tr><td><input type="checkbox" value="${q.id}"></td>${row(q).replace(/^<tr[^>]*>/, "").replace(/<\/tr>$/, "")}</tr>`).join("")}</table>
+    <div class="row" style="margin-top:8px"><button class="b" id="pman">Create from ticked</button></div>` : `<p class="muted">No published questions yet.</p>`;
+  const done = async res => {
+    const q = await Promise.all(res.question_ids.map(i => j(`/questions/${i}`)));
+    $("#pres").innerHTML = `<div class="card"><h3 style="margin-top:0">Paper #${res.id} (${q.reduce((a, b) => a + b.marks, 0)} marks)</h3>
+     <ol id="order">${q.map(x => `<li data-id="${x.id}">${esc(x.code)} · ${x.marks}m · ${esc((x.text||"").slice(0,70))} <button class="b" data-up>↑</button> <button class="b" data-dn>↓</button></li>`).join("")}</ol>
+     <div class="row"><button class="b" id="pord">Save order</button><button class="b" data-pe="pdf">PDF</button><button class="b" data-pe="docx">DOCX</button><button class="b" data-pe="md">Markdown</button></div></div>`;
+    $("#order").onclick = e => { const li = e.target.closest("li"); if (!li) return;
+      if (e.target.dataset.up !== undefined && li.previousElementSibling) li.parentNode.insertBefore(li, li.previousElementSibling);
+      if (e.target.dataset.dn !== undefined && li.nextElementSibling) li.parentNode.insertBefore(li.nextElementSibling, li); };
+    const ids = () => [...$("#order").children].map(l => +l.dataset.id);
+    $("#pord").onclick = async () => { try { await j(`/papers/${res.id}/order`, { method:"PUT", json: ids() }); note("Order saved.", "warn"); } catch (x) { note(x.message, "err"); } };
+    $("#pres").querySelectorAll("[data-pe]").forEach(b => b.onclick = async () => { try { await j(`/papers/${res.id}/order`, { method:"PUT", json: ids() }); download(`/papers/${res.id}/export?format=${b.dataset.pe}`, `paper_${res.id}.${b.dataset.pe === "md" ? "zip" : b.dataset.pe}`); } catch (x) { note(x.message, "err"); } });
+  };
+  $("#pauto").onclick = async () => {
+    try { done(await j("/papers/auto", { method:"POST", json:{ title:$("#pt").value, class_name:$("#pc").value, subject:$("#ps").value, duration:$("#pd").value, total_marks:+$("#pm").value,
+      chapters:$("#pch").value.split(",").map(s => s.trim()).filter(Boolean), difficulty_mix:{ Easy:+$("#pe").value/100, Medium:+$("#pme").value/100, Hard:+$("#ph").value/100 } } })); }
+    catch (x) { note(x.message, "err"); } };
+  const man = $("#pman"); if (man) man.onclick = async () => {
+    const ids = [...$("#plist").querySelectorAll("input:checked")].map(i => +i.value); if (!ids.length) return note("Tick at least one question.", "err");
+    try { done(await j("/papers", { method:"POST", json:{ title:$("#pt").value, class_name:$("#pc").value, subject:$("#ps").value, duration:$("#pd").value, question_ids:ids } })); } catch (x) { note(x.message, "err"); } };
+}
+
+// ── school ──
+async function renderSchool() {
+  const s = await j("/school");
+  $("#v-school").innerHTML = `<div class="card"><h3 style="margin-top:0">School settings <span class="muted">(admin role)</span></h3>
+   <div class="row"><label>Name<input id="sn" value="${esc(s.name)}" size="30"></label><label>Address<input id="sa" value="${esc(s.address)}" size="34"></label>
+    <label>Logo (PNG/JPG)<input id="sl" type="file" accept="image/*"></label></div>
+   <label style="flex-direction:row;gap:8px;align-items:center;margin:10px 0"><input type="checkbox" id="sai" ${s.allow_external_ai ? "checked" : ""} style="width:auto"> Allow external AI (watsonx.ai). Untick to keep all processing local.</label>
+   <button class="b p" id="ss">Save</button></div>`;
+  $("#ss").onclick = async () => {
+    try { await j("/school", { method:"PUT", json:{ name:$("#sn").value, address:$("#sa").value, allow_external_ai:$("#sai").checked } });
+      const f = $("#sl").files[0]; if (f) { const fd = new FormData(); fd.append("file", f); await j("/school/logo", { method:"POST", body: fd }); }
+      note("Saved.", "warn"); } catch (x) { note(x.message, "err"); } };
+}
+
+show("upload");
+</script>
+</body>
+</html>
